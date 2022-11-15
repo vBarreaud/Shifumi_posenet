@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+
+<script type="text/javascript">
+
+
+class shifumi_item {
+	constructor(id,name,path){
+		this.__id = id;
+		this.__name = name;
+		this.__path = path;
+		this.__image;
+		this.__sampleArray = new Array();
+	}
+	setImage(image){
+		this.__image = image;
+	}
+	marshall(){
+		let retourImage;
+		let sampleCanvas = document.createElement("canvas");
+	  sampleCanvas.getContext("2d").drawImage(this.__image,0,0,224,224);
+		retourImage = sampleCanvas.toDataURL('image/jpeg', 1.0);
+		return {"id":this.__id,"name":this.__name,"marshalledImage":retourImage};
+	}
+	display(){
+		console.log(this);
+	}
+	loadImage(){
+	  const image = new Image(200,200); //width, height
+	  return new Promise((fonctionALancerSiToutSePasseBien, fonctionALancerSiCaVaMal) => {
+	    image.addEventListener("load",()=>{
+	      this.setImage(image);
+				
+	      fonctionALancerSiToutSePasseBien();
+	    });
+	    image.addEventListener("error",()=>{
+	      fonctionALancerSiCaVaMal(`Caramba, cannot load ${this.__path}`);
+	    });
+	    image.src = this.__path;
+	  });
+	}
+}
+
+class shifumi_set extends Array {
+	constructor(){
+		super();	
+		
+		this.push(new shifumi_item(0,"rock","./assets/rock.png"));
+		this.push(new shifumi_item(1,"paper","./assets/paper.png"));
+		this.push(new shifumi_item(2,"scissors","./assets/scissors.png"));
+
+		let promises = new Array();
+	  for (let shifumi of this){
+	    promises.push( shifumi.loadImage() );
+	  }
+	  
+	  this.__promises = Promise.all(promises);
+				
+	}
+	async initialize(){
+		const response = await this.__promises;
+	}
+	display(){
+		for(let shifumi of this.instance){
+			shifumi.display();
+		}
+	}
+	getAnyShifumiItem(){
+		return (this.instance)[Math.floor(Math.random()*(this.instance).length)];
+	}
+	getAllShifumi(){
+		let response = new Array();
+		for(let shifumi of this){
+			response.push(shifumi.marshall());
+		}
+		console.log("I am asked to give all my shifumis");
+		return response;
+	}
+}
+
+class myMessage{
+	constructor(type,payload){
+		this.type=type;
+		this.payload=payload;
+	}
+}
+
+class sample{
+	constructor(img,name){
+		this.img=img;
+		this.name=name;
+	}
+}
+
+	/////////////////////	
+async function start (){
+	
+	///////////////
+	// COMMUNICATION
+	///////////////
+	const shifumi_com_worker = new SharedWorker('./shifumi_com_worker.js');	
+	shifumi_com_worker.port.onmessage = function(e){
+		if(e.data.hasOwnProperty("type") ) {
+			console.log(`training.html has just received a ${e.data.type} message`);
+			if(e.data.type == "getAllDAO_query") {
+				let object = __shifumiSet.getAllShifumi();
+				let temp = new myMessage("getAllDAO_response",JSON.stringify(object));
+				shifumi_com_worker.port.postMessage(temp);
+			}	
+		}
+	}
+
+	
+	///////////////
+	// INTERFACE
+	///////////////
+	let __parentDiv = document.getElementById("shifumiTraining");
+	let width = 224;    // We will scale the photo width to this
+    let height = 224;     // This will be computed based on the input stream
+    let streaming = false;
+    let canvas = null;
+    let photo = null;
+	//VIDEO ELEMENT
+	let __videoElement = document.createElement("video");
+	__parentDiv.appendChild(__videoElement);		 
+	const constraints = {'video':true,'audio':false};       
+  navigator.mediaDevices.getUserMedia(constraints)
+    	.then((mediaStream) => {
+        	__videoElement.srcObject = mediaStream;
+        	__videoElement.onloadedmetadata = (e) => {
+          	__videoElement.play();
+      		};
+      	})
+    	.catch((err) => { 
+      		console.log(err.name + ": " + err.message); 
+    	}); // always check for errors at the end.
+
+  	__videoElement.addEventListener('canplay', (ev)=>{
+        if (!streaming) {
+          height = __videoElement.videoHeight / (__videoElement.videoWidth/width);
+    
+          if (isNaN(height)) {
+              height = width;
+          }
+    
+          __videoElement.setAttribute('width', width);
+          __videoElement.setAttribute('height', height);
+          streaming = true;
+        }
+    }, false);
+
+  //Training Shifumi ELEMENT 	
+  let __shifumiSet;
+  let __shifumiItemArray = new Array();
+  try {
+		__shifumiSet = new shifumi_set();
+		await __shifumiSet.initialize();
+		console.log("ShifumiSet is initialized !");
+		
+		for (let item of __shifumiSet){
+	  		let shifumiDiv = document.createElement("div");
+	  		shifumiDiv.setAttribute("style","border:solid");
+	  		shifumiDiv.setAttribute("class","shifumiDiv");
+	  		
+	  		
+	  		let exampleCanvas = document.createElement("canvas");
+			  exampleCanvas.setAttribute("width",width);
+			  exampleCanvas.setAttribute("height",height);
+	  		exampleCanvas.getContext("2d").drawImage(item.__image,0,0,width,height);
+	  		shifumiDiv.appendChild(exampleCanvas);
+				
+
+
+	  		exampleCanvas.addEventListener("click",()=>{
+	  			let sampleCanvas = document.createElement("canvas");
+	  			sampleCanvas.setAttribute("width",width);
+				  sampleCanvas.setAttribute("height",height);
+	  			sampleCanvas.getContext("2d").drawImage(__videoElement,0,0,width/2,height/2);
+	  			shifumiDiv.appendChild(sampleCanvas);
+	  			let data = sampleCanvas.toDataURL('image/jpeg', 1.0);
+	  			let payload = new sample(data,item.__name);
+					let temp = new myMessage('sample',payload);
+					shifumi_com_worker.port.postMessage(temp);
+	  			console.log(`sending a ${item.__name} sample : ${data}.`);
+	  		});
+
+	  		__parentDiv.appendChild(shifumiDiv);
+	  		__shifumiItemArray.push(shifumiDiv);
+  		}
+	}catch (err) {
+			console.log(err.name + ": " + err.message); 
+	}
+
+
+	  			 
+	
+
+}
+
+
+window.addEventListener("DOMContentLoaded", start);
+
+
+</script>
+
+<body>
+	<div id="shifumiTraining"></div>
+</body>
+</html>
+
+
+
+
+
+
